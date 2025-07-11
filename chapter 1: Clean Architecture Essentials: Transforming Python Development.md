@@ -1,5 +1,4 @@
 
-<div dir="rtl" style="text-align: right;">
 
 ### فصل 1: اصول معماری تمیز: تحول توسعه پایتون (Chapter 1: Clean Architecture Essentials: Transforming Python Development)
 
@@ -45,7 +44,6 @@
 
 *   **قانون وابستگی (The Dependency Rule)**: **وابستگی‌های کد منبع فقط باید به سمت داخل، به سمت سیاست‌های سطح بالاتر، اشاره کنند.** دایره‌های داخلی نباید چیزی در مورد دایره‌های بیرونی بدانند، در حالی که دایره‌های بیرونی باید به دایره‌های داخلی وابسته بوده و با آن‌ها سازگار شوند. این امر تضمین می‌کند که تغییرات در عناصر خارجی (مانند پایگاه‌های داده، UI یا چارچوب‌ها) بر منطق اصلی کسب‌وکار تأثیر نمی‌گذارد.
     *   **مثال ساده پایتون (Simple Python example)**: در یک سیستم مدیریت کتابخانه، کلاس `Book` (هسته) چیزی در مورد `BookInventory` یا `BookInterface` (لایه بیرونی) نمی‌داند. `BookInventory` ممکن است از `Book` استفاده کند اما در مورد رابط کاربری چیزی نمی‌داند. این جداسازی تضمین می‌کند که منطق اصلی تحت تأثیر دغدغه‌های خارجی قرار نمی‌گیرد.
-</div>
 
 ```python
 # Example 1: Simple conceptual example demonstrating dependency rule
@@ -80,7 +78,6 @@ class BookInterface:
 # BookInventory uses Book but knows nothing about BookInterface.
 # BookInterface uses BookInventory.
 ```
-<div dir="rtl" style="text-align: right;">
 
 
 این ساختار به ما اجازه می‌دهد که لایه‌های بیرونی را بدون تأثیر بر لایه‌های داخلی تغییر دهیم یا حتی جایگزین کنیم.
@@ -104,7 +101,6 @@ class BookInterface:
 
     *   **مثال کلاس‌های پایه انتزاعی (ABCs)**:
 
-</div>
 
 ```python
 from abc import ABC, abstractmethod
@@ -144,7 +140,6 @@ sms_service = NotificationService(sms_notifier)
 sms_service.notify("Hello via SMS") # Output: Sending SMS: Hello via SMS
 ```
 
-</div>
 
         **توضیح مثال ABCs**:
         *   **ABC**: کلاس `Notifier` یک کلاس پایه انتزاعی است که رابطی را تعریف می‌کند که همه کلاس‌های Notifier باید از آن پیروی کنند. این نمایانگر یک حلقه داخلی در ساختار معماری تمیز ماست.
@@ -154,7 +149,6 @@ sms_service.notify("Hello via SMS") # Output: Sending SMS: Hello via SMS
 
     *   **Duck Typing و Protocol**: پایتون امکان پیاده‌سازی اصول معماری تمیز را بدون استفاده از سلسله‌مراتب کلاس، بلکه با اتکا به Duck Typing، فراهم می‌کند. **Duck Typing** مفهومی برنامه‌نویسی است که در آن مناسب بودن یک شیء با وجود متدها یا ویژگی‌های خاص تعیین می‌شود، نه با نوع صریح آن.
         *   **مثال با Protocol (پایتون 3.8+):**
-<div dir="rtl" style="text-align: right;">
 
 ```python
 from typing import Protocol
@@ -190,7 +184,6 @@ sms_service = NotificationService(sms_notifier)
 sms_service.notify("Hello via SMS") # Output: Sending SMS: Hello via SMS
 ```
 
-<div dir="rtl" style="text-align: right;">
 
 **توضیح مثال Protocol**:
 *   **Protocol در مقابل ABC**: کلاس `Notifier` اکنون یک کلاس `Protocol` است، که یک رابط زیرگروه‌بندی ساختاری را تعریف می‌کند، نه اینکه نیازمند ارث‌بری صریح باشد.
@@ -205,7 +198,6 @@ sms_service.notify("Hello via SMS") # Output: Sending SMS: Hello via SMS
     *   **شکل 1.2: یک طرح بالقوه برای یک برنامه وب پایتون با معماری تمیز (Figure 1.2: A potential layout for a Clean Architecture Python web application)**
         این شکل ساختار دایرکتوری‌های یک پروژه را نشان می‌دهد:
 
-</div>
 
 ```
 .
@@ -235,7 +227,6 @@ sms_service.notify("Hello via SMS") # Output: Sending SMS: Hello via SMS
     └── infrastructure/
 
 ```
-<div dir="rtl" style="text-align: right;">
 
 **توضیح ساختار**:
 1.  **تفکیک دغدغه‌ها (SoC)**: هر دایرکتوری نمایانگر یک لایه مجزا از برنامه است که با دایره‌های متحدالمرکز در شکل 1.1 همسو است.
