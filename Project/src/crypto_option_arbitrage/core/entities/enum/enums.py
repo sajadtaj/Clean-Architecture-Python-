@@ -33,3 +33,12 @@ class Market(str, Enum):
 
     # بازار جهانی
     GLOBAL = "بازار جهانی (کریپتو / خارجی)"
+    
+class ContractStatus(str, Enum):
+    IN_THE_MONEY = "In the money"
+    OUT_OF_THE_MONEY = "Out of the money"
+    AT_THE_MONEY = "At the money"
+    
+class OptionType(Enum):
+    CALL = "Call"
+    PUT = "Put"

@@ -1,6 +1,6 @@
 import pytest
-from core.entities.enums import AssetClass, Market
-from core.entities.etf_asset import ETFAsset
+from core.entities.enum.enums import AssetClass, Market
+from core.entities.asset.etf_asset import ETFAsset
 from core.config.market_rules import MARKET_PRICE_LIMITS
 from core.config.asset_rules import ASSET_TRANSACTION_FEES
 

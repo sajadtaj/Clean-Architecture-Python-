@@ -1,4 +1,4 @@
-from core.entities.enums import AssetClass
+from core.entities.enum.enums import AssetClass
 
 # مدت زمان تسویه برای هر کلاس دارایی (به روز کاری)
 ASSET_SETTLEMENT_DAYS = {

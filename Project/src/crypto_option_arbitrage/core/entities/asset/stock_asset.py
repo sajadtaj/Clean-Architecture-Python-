@@ -1,7 +1,7 @@
 # core/entities/stock_asset.py
 
-from core.entities.asset import AbstractAsset
-from core.entities.enums import AssetClass, Market
+from core.entities.asset.asset import AbstractAsset
+from core.entities.enum.enums import AssetClass, Market
 from core.config.trading_rules import ASSET_SETTLEMENT_DAYS, ASSET_TRADING_HOURS
 
 

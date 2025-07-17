@@ -1,4 +1,4 @@
-from core.entities.enums import Market
+from core.entities.enum.enums import Market
 
 # دامنه نوسان مجاز (بر حسب درصد)
 MARKET_PRICE_LIMITS = {
@@ -13,5 +13,5 @@ MARKET_PRICE_LIMITS = {
     Market.IFB_BASE_RED: 1.0,
     Market.ENERGY: 7.0,
     Market.COMMODITY: 10.0,
-    Market.GLOBAL: 100.0  # معمولاً بدون محدودیت نوسان
+    Market.GLOBAL: 0.0  # معمولاً بدون محدودیت نوسان
 }

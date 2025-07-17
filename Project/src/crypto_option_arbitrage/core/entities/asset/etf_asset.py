@@ -1,11 +1,9 @@
-# core/entities/leverage_etf_asset.py
-
-from core.entities.asset import AbstractAsset
-from core.entities.enums import AssetClass, Market
+from core.entities.asset.asset import AbstractAsset
+from core.entities.enum.enums import AssetClass, Market
 from core.config.trading_rules import ASSET_SETTLEMENT_DAYS, ASSET_TRADING_HOURS
 
 
-class LeverageETFAsset(AbstractAsset):
+class ETFAsset(AbstractAsset):
     def __init__(
         self,
         name: str,
@@ -18,7 +16,7 @@ class LeverageETFAsset(AbstractAsset):
         ask_price: float = None,
         bid_price: float = None
     ):
-        asset_class = AssetClass.LEVERAGE_ETF
+        asset_class = AssetClass.ETF
         settlement_days = ASSET_SETTLEMENT_DAYS[asset_class]
         trading_hours = ASSET_TRADING_HOURS[asset_class]
 

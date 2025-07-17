@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 from datetime import datetime, time
 from abc import ABC
 
-from core.entities.enums import AssetClass, Market
+from core.entities.enum.enums import AssetClass, Market
 from core.config.market_rules import MARKET_PRICE_LIMITS
 from core.config.asset_rules import ASSET_TRANSACTION_FEES
 
@@ -48,13 +48,13 @@ class AbstractAsset(ABC):
         return start <= now.time() <= end
 
     def has_price_limit_breach(self, current_price: float) -> bool:
-        """
-        بررسی عبور از دامنه مجاز نوسان قیمت
-        """
         limit_percent = self.get_price_limit()
+        if limit_percent == 0.0:
+            return False  # برای کریپتو یا دارایی‌های بدون محدودیت
         upper_limit = self.close_price * (1 + limit_percent / 100)
         lower_limit = self.close_price * (1 - limit_percent / 100)
         return current_price > upper_limit or current_price < lower_limit
+
 
     def get_spread(self) -> Optional[float]:
         """

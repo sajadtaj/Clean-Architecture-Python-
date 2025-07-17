@@ -1,4 +1,4 @@
-from core.entities.enums import AssetClass
+from core.entities.enum.enums import AssetClass
 
 # کارمزد معاملات به درصد
 ASSET_TRANSACTION_FEES = {
