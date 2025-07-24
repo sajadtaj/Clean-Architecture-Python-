@@ -1,16 +1,19 @@
-# core/entities/option/stock_option.py
+# core/entities/option/etf_option.py
 
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+
 from core.entities.option.option import AbstractOption
-from core.entities.asset.stock_asset import StockAsset
+from core.entities.asset.etf_asset import ETFAsset
 from core.entities.enum.enums import OptionType
 
 
 @dataclass
-class StockOption(AbstractOption):
-    underlying_asset: StockAsset
+class ETFOption(AbstractOption):
+    underlying_asset: ETFAsset
+    benchmark_index: Optional[str] = None  # مثلاً "S&P 500", "شاخص هم‌وزن"
+    nav_deviation: Optional[float] = None  # اختلاف قیمت بازار با NAV
 
     def calculate_raw_payoff(self, spot_price: float) -> float:
         if self.option_type == OptionType.CALL:
@@ -34,3 +37,21 @@ class StockOption(AbstractOption):
         fee = (self.transaction_fee / 100 * self.strike_price) if self.transaction_fee else 0
         settle = (self.settlement_cost / 100 * self.strike_price) if self.settlement_cost else 0
         return self.strike_price + self.premium + fee + settle
+
+
+    def is_liquid(self) -> bool:
+        """
+        بررسی نقدشوندگی: اگر اسپرد خیلی زیاد باشد، نقدشوندگی پایین است.
+        """
+        spread = self.underlying_asset.get_spread()
+        if spread is None:
+            return False
+        return spread / self.underlying_asset.last_price < 0.02  # کمتر از ۲٪
+
+    def has_nav_deviation(self, nav_price: float) -> bool:
+        """
+        بررسی انحراف قیمت نسبت به NAV
+        """
+        deviation = abs(self.spot_price - nav_price) / nav_price
+        self.nav_deviation = deviation
+        return deviation > 0.03  # بیشتر از ۳٪

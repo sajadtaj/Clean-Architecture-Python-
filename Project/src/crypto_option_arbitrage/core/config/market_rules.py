@@ -15,3 +15,7 @@ MARKET_PRICE_LIMITS = {
     Market.COMMODITY: 10.0,
     Market.GLOBAL: 0.0  # معمولاً بدون محدودیت نوسان
 }
+
+
+# نرخ بهره بدون ریسک ایران به صورت عدد اعشاری (مثلاً 20 درصد = 0.2)
+RISK_FREE_RATE = 0.2

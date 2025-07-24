@@ -53,6 +53,10 @@ MARKET_PRICE_LIMITS = {
     Market.COMMODITY: 10.0,
     Market.GLOBAL: 0.0  # معمولاً بدون محدودیت نوسان
 }
+
+
+# نرخ بهره بدون ریسک ایران به صورت عدد اعشاری (مثلاً 20 درصد = 0.2)
+RISK_FREE_RATE = 0.2
 ```
 
 - **File**: `trading_rules.py`
@@ -278,7 +282,8 @@ class LeverageETFAsset(AbstractAsset):
         close_price: float,
         previous_price: float,
         ask_price: float = None,
-        bid_price: float = None
+        bid_price: float = None,
+        leverage_ratio: float = 2.0  # نسبت اهرم پیش‌فرض (مثلاً 2 برابر)
     ):
         asset_class = AssetClass.LEVERAGE_ETF
         settlement_days = ASSET_SETTLEMENT_DAYS[asset_class]
@@ -366,26 +371,38 @@ class AssetClass(str, Enum):
 
 
 class Market(str, Enum):
+    #
     # بورس اوراق بهادار تهران (TSE)
+    #
     TSE_FIRST = "بورس - بازار اول"
     TSE_SECOND = "بورس - بازار دوم"
-
+    #
     # فرابورس ایران (IFB)
+    #
     IFB_FIRST = "فرابورس - بازار اول"
     IFB_SECOND = "فرابورس - بازار دوم"
     IFB_THIRD = "فرابورس - بازار سوم"
     IFB_INNOVATION = "فرابورس - ابزارهای نوین مالی"
 
+    #
     # بازار پایه فرابورس
+    #
+
     IFB_BASE_YELLOW = "بازار پایه - زرد"
     IFB_BASE_ORANGE = "بازار پایه - نارنجی"
     IFB_BASE_RED = "بازار پایه - قرمز"
 
+    #
     # سایر بازارهای رسمی ایران
+    #
+
     ENERGY = "بورس انرژی"
     COMMODITY = "بورس کالا"
-
+    
+    #
     # بازار جهانی
+    #
+    
     GLOBAL = "بازار جهانی (کریپتو / خارجی)"
     
 class ContractStatus(str, Enum):
@@ -413,10 +430,199 @@ class OptionType(Enum):
 ## 🗂️ Layer: Option
 📂 Path: `core/entities/option`
 
+
+## 🗂️ Layer: Calculators
+📂 Path: `core/entities/option/calculators`
+
+
+## 🗂️ Layer: Greeks
+📂 Path: `core/entities/option/calculators/greeks`
+
+- **File**: `base.py`
+  - 📍 Path: `core/entities/option/calculators/greeks/base.py`
+
+```python
+from abc import ABC, abstractmethod
+from core.entities.option.value_objects.greeks import OptionGreeks
+from core.entities.enum.enums import OptionType
+
+class BaseGreekCalculator(ABC):
+    @abstractmethod
+    def calculate(
+        self,
+        option_type: OptionType,
+        spot: float,
+        strike: float,
+        time_to_expiry: float,
+        risk_free_rate: float,
+        volatility: float
+    ) -> OptionGreeks:
+        pass
+```
+
+- **File**: `black_scholes.py`
+  - 📍 Path: `core/entities/option/calculators/greeks/black_scholes.py`
+
+```python
+from math import exp, log, sqrt
+from scipy.stats import norm
+from core.entities.enum.enums import OptionType
+from core.entities.option.value_objects.greeks import OptionGreeks
+from core.entities.option.calculators.greeks.base import BaseGreekCalculator
+
+class BlackScholesGreekCalculator(BaseGreekCalculator):
+    def calculate(self, option_type, spot, strike, time_to_expiry, risk_free_rate, volatility) -> OptionGreeks:
+        d1 = (log(spot / strike) + (risk_free_rate + 0.5 * volatility ** 2) * time_to_expiry) / (volatility * sqrt(time_to_expiry))
+        d2 = d1 - volatility * sqrt(time_to_expiry)
+
+        if option_type == OptionType.CALL:
+            delta = norm.cdf(d1)
+            theta = (-spot * norm.pdf(d1) * volatility / (2 * sqrt(time_to_expiry))
+                     - risk_free_rate * strike * exp(-risk_free_rate * time_to_expiry) * norm.cdf(d2))
+            rho = strike * time_to_expiry * exp(-risk_free_rate * time_to_expiry) * norm.cdf(d2)
+        else:
+            delta = -norm.cdf(-d1)
+            theta = (-spot * norm.pdf(d1) * volatility / (2 * sqrt(time_to_expiry))
+                     + risk_free_rate * strike * exp(-risk_free_rate * time_to_expiry) * norm.cdf(-d2))
+            rho = -strike * time_to_expiry * exp(-risk_free_rate * time_to_expiry) * norm.cdf(-d2)
+
+        gamma = norm.pdf(d1) / (spot * volatility * sqrt(time_to_expiry))
+        vega = spot * norm.pdf(d1) * sqrt(time_to_expiry)
+
+        return OptionGreeks(
+            delta=delta,
+            gamma=gamma,
+            theta=theta / 365,  # تبدیل به روز
+            vega=vega / 100,
+            rho=rho / 100
+        )
+```
+
+- **File**: `etf_option.py`
+  - 📍 Path: `core/entities/option/etf_option.py`
+
+```python
+# core/entities/option/etf_option.py
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional
+
+from core.entities.option.option import AbstractOption
+from core.entities.asset.etf_asset import ETFAsset
+from core.entities.enum.enums import OptionType
+
+
+@dataclass
+class ETFOption(AbstractOption):
+    underlying_asset: ETFAsset
+    benchmark_index: Optional[str] = None  # مثلاً "S&P 500", "شاخص هم‌وزن"
+    nav_deviation: Optional[float] = None  # اختلاف قیمت بازار با NAV
+
+    def calculate_raw_payoff(self, spot_price: float) -> float:
+        if self.option_type == OptionType.CALL:
+            return max(0.0, spot_price - self.strike_price)
+        return max(0.0, self.strike_price - spot_price)
+
+    def get_payoff(self, spot_price: Optional[float] = None) -> float:
+        spot = spot_price or self.spot_price
+        raw_payoff_per_unit = self.calculate_raw_payoff(spot)
+
+        # ✅ هزینه‌ها برای یک واحد
+        fee_per_unit = (self.transaction_fee / 100 * spot) if self.transaction_fee else 0
+        settle_per_unit = (self.settlement_cost / 100 * spot) if self.settlement_cost else 0
+
+
+
+        total_cost_per_unit = self.premium + fee_per_unit + settle_per_unit
+        return (raw_payoff_per_unit - total_cost_per_unit) * self.contract_size
+
+    def get_break_even_price(self) -> float:
+        fee = (self.transaction_fee / 100 * self.strike_price) if self.transaction_fee else 0
+        settle = (self.settlement_cost / 100 * self.strike_price) if self.settlement_cost else 0
+        return self.strike_price + self.premium + fee + settle
+
+
+    def is_liquid(self) -> bool:
+        """
+        بررسی نقدشوندگی: اگر اسپرد خیلی زیاد باشد، نقدشوندگی پایین است.
+        """
+        spread = self.underlying_asset.get_spread()
+        if spread is None:
+            return False
+        return spread / self.underlying_asset.last_price < 0.02  # کمتر از ۲٪
+
+    def has_nav_deviation(self, nav_price: float) -> bool:
+        """
+        بررسی انحراف قیمت نسبت به NAV
+        """
+        deviation = abs(self.spot_price - nav_price) / nav_price
+        self.nav_deviation = deviation
+        return deviation > 0.03  # بیشتر از ۳٪
+```
+
 - **File**: `__init__.py`
   - 📍 Path: `core/entities/option/__init__.py`
 
 ```python
+```
+
+- **File**: `leverage_etf_option.py`
+  - 📍 Path: `core/entities/option/leverage_etf_option.py`
+
+```python
+from dataclasses import dataclass
+from typing import Optional
+from core.entities.option.option import AbstractOption
+from core.entities.asset.leverage_etf_asset import LeverageETFAsset
+from core.entities.enum.enums import OptionType
+
+
+@dataclass
+class LeverageETFOption(AbstractOption):
+    underlying_asset: LeverageETFAsset
+    leverage_ratio: Optional[float] = 2.0  # اهرم پیش‌فرض
+
+    def calculate_raw_payoff(self, spot_price: float) -> float:
+        if self.option_type == OptionType.CALL:
+            return max(0.0, (spot_price - self.strike_price) * self.leverage_ratio)
+        return max(0.0, (self.strike_price - spot_price) * self.leverage_ratio)
+
+    def get_payoff(self, spot_price: Optional[float] = None) -> float:
+        spot = spot_price or self.spot_price
+        raw_payoff_per_unit = self.calculate_raw_payoff(spot)
+
+        fee_per_unit = (self.transaction_fee / 100 * spot) if self.transaction_fee else 0
+        settle_per_unit = (self.settlement_cost / 100 * spot) if self.settlement_cost else 0
+
+        total_cost_per_unit = self.premium + fee_per_unit + settle_per_unit
+        return (raw_payoff_per_unit - total_cost_per_unit) * self.contract_size
+
+    def get_break_even_price(self) -> float:
+        fee = (self.transaction_fee / 100 * self.strike_price) if self.transaction_fee else 0
+        settle = (self.settlement_cost / 100 * self.strike_price) if self.settlement_cost else 0
+        return self.strike_price + self.premium + fee + settle
+
+    def get_max_loss(self) -> float:
+        """حداکثر زیان = کل هزینه پرداختی برای قرارداد"""
+        spot = self.spot_price or self.strike_price
+        fee = (self.transaction_fee / 100 * spot) if self.transaction_fee else 0
+        settle = (self.settlement_cost / 100 * spot) if self.settlement_cost else 0
+        total_cost_per_unit = self.premium + fee + settle
+        return total_cost_per_unit * self.contract_size
+
+    def get_max_gain(self, max_spot: float = None) -> Optional[float]:
+        """
+        حداکثر سود = (سقف قیمت بازار - قیمت اعمال) × اهرم × contract_size - هزینه کل
+        در صورت نبود سقف قیمت، مقدار None برمی‌گرداند
+        """
+        if self.option_type == OptionType.CALL and max_spot:
+            raw = max(0, (max_spot - self.strike_price) * self.leverage_ratio)
+            return raw * self.contract_size - self.get_max_loss()
+        if self.option_type == OptionType.PUT and max_spot:
+            raw = max(0, (self.strike_price - max_spot) * self.leverage_ratio)
+            return raw * self.contract_size - self.get_max_loss()
+        return None
 ```
 
 - **File**: `option.py`
@@ -428,9 +634,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 from math import ceil
+from core.config.market_rules import RISK_FREE_RATE
 
 from core.entities.enum.enums import OptionType, ContractStatus
 from core.entities.asset.asset import AbstractAsset
+from core.entities.option.calculators.greeks.black_scholes import BlackScholesGreekCalculator
+from core.entities.option.value_objects.greeks import OptionGreeks
+from core.entities.option.calculators.greeks.base import BaseGreekCalculator
 
 
 @dataclass
@@ -493,7 +703,29 @@ class AbstractOption(ABC):
             self.expiry > datetime.utcnow() and
             isinstance(self.underlying_asset, AbstractAsset)
         )
-
+        
+    def get_greeks(
+        self,
+        calculator: BaseGreekCalculator = BlackScholesGreekCalculator(),
+        risk_free_rate: float = RISK_FREE_RATE,
+        volatility: float = 0.3
+    ) -> OptionGreeks:
+        """
+        محاسبه Greekها با استفاده از مدل مشخص شده
+        پارامترها:
+        - calculator: شیء محاسبه‌گر از کلاس GreekCalculator (مانند BlackScholesGreekCalculator)
+        - risk_free_rate: نرخ بهره بدون ریسک (پیش‌فرض از کانفیگ)
+        - volatility: نوسان دارایی پایه (پیش‌فرض 30 درصد)
+        """
+        return calculator.calculate(
+            option_type=self.option_type,
+            spot=self.spot_price,
+            strike=self.strike_price,
+            time_to_expiry=self.time_to_expiry_days / 365,
+            risk_free_rate=risk_free_rate,
+            volatility=volatility
+        )
+        
     @abstractmethod
     def get_payoff(self, spot_price: Optional[float] = None) -> float:
         ...
@@ -517,11 +749,9 @@ from core.entities.asset.stock_asset import StockAsset
 from core.entities.enum.enums import OptionType
 
 
-
 @dataclass
 class StockOption(AbstractOption):
-    underlying_asset: StockAsset  # LSP: وابستگی صریح به نوع صحیح دارایی پایه
-
+    underlying_asset: StockAsset
 
     def calculate_raw_payoff(self, spot_price: float) -> float:
         if self.option_type == OptionType.CALL:
@@ -530,21 +760,43 @@ class StockOption(AbstractOption):
 
     def get_payoff(self, spot_price: Optional[float] = None) -> float:
         spot = spot_price or self.spot_price
-        raw = self.calculate_raw_payoff(spot)
-        
-        fee = (self.transaction_fee / 100 * spot) if self.transaction_fee else 0
-        settle = self.settlement_cost if (self.settlement_cost and self.settlement_cost > 1) else (
-            self.settlement_cost * spot if self.settlement_cost else 0)
-        total_cost = self.premium + fee + settle
+        raw_payoff_per_unit = self.calculate_raw_payoff(spot)
 
-        return raw - total_cost
+        # ✅ هزینه‌ها برای یک واحد
+        fee_per_unit = (self.transaction_fee / 100 * spot) if self.transaction_fee else 0
+        settle_per_unit = (self.settlement_cost / 100 * spot) if self.settlement_cost else 0
 
+
+
+        total_cost_per_unit = self.premium + fee_per_unit + settle_per_unit
+        return (raw_payoff_per_unit - total_cost_per_unit) * self.contract_size
 
     def get_break_even_price(self) -> float:
         fee = (self.transaction_fee / 100 * self.strike_price) if self.transaction_fee else 0
-        settle = self.settlement_cost if (self.settlement_cost and self.settlement_cost > 1) else (
-            self.settlement_cost * self.strike_price if self.settlement_cost else 0)
+        settle = (self.settlement_cost / 100 * self.strike_price) if self.settlement_cost else 0
         return self.strike_price + self.premium + fee + settle
+```
+
+
+## 🗂️ Layer: Value Objects
+📂 Path: `core/entities/option/value_objects`
+
+- **File**: `greeks.py`
+  - 📍 Path: `core/entities/option/value_objects/greeks.py`
+
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class OptionGreeks:
+    delta: float
+    gamma: float
+    theta: float
+    vega: float
+    rho: float
+
+    def __str__(self):
+        return f"Δ: {self.delta:.4f}, Γ: {self.gamma:.4f}, Θ: {self.theta:.4f}, 𝜈: {self.vega:.4f}, ρ: {self.rho:.4f}"
 ```
 
 - **File**: `__init__.py`
@@ -680,13 +932,14 @@ class StockOption(AbstractOption):
   },
   {
    "cell_type": "code",
-   "execution_count": 2,
+   "execution_count": null,
    "id": "6f69984b",
    "metadata": {},
    "outputs": [],
    "source": [
-    "from core.entities.asset.stock_asset import StockAsset\n",
     "from core.entities.enum.enums import Market\n",
+    "# Stock Crypto Etf\n",
+    "from core.entities.asset.stock_asset import StockAsset\n",
     "from core.entities.asset.crypto_asset import CryptoAsset\n",
     "from core.entities.asset.etf_asset import ETFAsset\n"
    ]
@@ -1081,21 +1334,13 @@ class StockOption(AbstractOption):
    "outputs": [],
    "source": [
     "import os\n",
-    "os.chdir('/home/sajad/All Project/Clean Architecture Python/Project/src/crypto_option_arbitrage')"
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": 2,
-   "id": "06ea2588",
-   "metadata": {},
-   "outputs": [],
-   "source": [
+    "os.chdir('/home/sajad/All Project/Clean Architecture Python/Project/src/crypto_option_arbitrage')\n",
     "from datetime import datetime, timedelta\n",
-    "\n",
-    "from core.entities.asset.stock_asset import StockAsset\n",
     "from core.entities.enum.enums import Market, OptionType, ContractStatus\n",
-    "from core.entities.option.stock_option import StockOption"
+    "from core.config.market_rules import RISK_FREE_RATE\n",
+    "from core.entities.option.value_objects.greeks import OptionGreeks\n",
+    "from core.entities.option.calculators.greeks.black_scholes import BlackScholesGreekCalculator\n",
+    "\n"
    ]
   },
   {
@@ -1108,7 +1353,18 @@ class StockOption(AbstractOption):
   },
   {
    "cell_type": "code",
-   "execution_count": 4,
+   "execution_count": 2,
+   "id": "aba6b064",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from core.entities.asset.stock_asset import StockAsset\n",
+    "from core.entities.option.stock_option import StockOption"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
    "id": "9f4b9ff6",
    "metadata": {},
    "outputs": [],
@@ -1129,13 +1385,13 @@ class StockOption(AbstractOption):
   },
   {
    "cell_type": "code",
-   "execution_count": 5,
+   "execution_count": 4,
    "id": "9c9c8fab",
    "metadata": {},
    "outputs": [],
    "source": [
     "# Cell 4: ساخت آپشن کال\n",
-    "call_option = StockOption(\n",
+    "stock_option = StockOption(\n",
     "    contract_name=\"FOLD_C_1000\",\n",
     "    option_type=OptionType.CALL,\n",
     "    strike_price=1000,\n",
@@ -1151,7 +1407,7 @@ class StockOption(AbstractOption):
   },
   {
    "cell_type": "code",
-   "execution_count": 6,
+   "execution_count": 5,
    "id": "85da6bf4",
    "metadata": {},
    "outputs": [
@@ -1160,26 +1416,261 @@ class StockOption(AbstractOption):
      "output_type": "stream",
      "text": [
       "Spot Price: 1100\n",
-      "Time to Expiry: 9\n",
-      "Break Even: 1053.0\n",
-      "Payoff: 97000.0\n",
-      "Contract Status: ContractStatus.IN_THE_MONEY\n"
+      "Time to Expiry: 10\n",
+      "Break Even: 1080.0\n",
+      "Payoff: 65500.0\n",
+      "Contract Status: ContractStatus.IN_THE_MONEY\n",
+      "\n",
+      "📘 Greekهای StockOption:\n",
+      "Δ: 0.9800, Γ: 0.0009, Θ: -0.6647, 𝜈: 0.0880, ρ: 0.2663\n"
      ]
     }
    ],
    "source": [
     "# Cell 5: بررسی عملکردها\n",
-    "print(\"Spot Price:\", call_option.spot_price)\n",
-    "print(\"Time to Expiry:\", call_option.time_to_expiry_days)\n",
-    "print(\"Break Even:\", call_option.get_break_even_price())\n",
-    "print(\"Payoff:\", call_option.get_payoff(spot_price=1150))\n",
-    "print(\"Contract Status:\", call_option.contract_status)\n"
+    "print(\"Spot Price:\", stock_option.spot_price)\n",
+    "print(\"Time to Expiry:\", stock_option.time_to_expiry_days)\n",
+    "print(\"Break Even:\", stock_option.get_break_even_price())\n",
+    "print(\"Payoff:\", stock_option.get_payoff(spot_price=1150))\n",
+    "print(\"Contract Status:\", stock_option.contract_status)\n",
+    "\n",
+    "# انتخاب مدل محاسبه اعداد یونانی ماژولار است\n",
+    "calculator = BlackScholesGreekCalculator()\n",
+    "print(\"\\n📘 Greekهای StockOption:\")\n",
+    "print(stock_option.get_greeks(calculator=calculator))\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "30aa63ce",
+   "metadata": {},
+   "source": [
+    "## ETF"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "c83189c1",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from core.entities.asset.etf_asset import ETFAsset\n",
+    "from core.entities.option.etf_option import ETFOption"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "ede6a2be",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "etf = ETFAsset(\n",
+    "    name=\"صندوق شاخصی\",\n",
+    "    symbol=\"صندوق\",\n",
+    "    isin=\"IR1234567890\",\n",
+    "    market=Market.IFB_THIRD,\n",
+    "    last_price=10200,\n",
+    "    close_price=10100,\n",
+    "    previous_price=10000,\n",
+    "    ask_price=10250,\n",
+    "    bid_price=10150\n",
+    ")\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "ebb31759",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "etf_option = ETFOption(\n",
+    "    contract_name=\"ETF_CALL_10500\",\n",
+    "    option_type=OptionType.CALL,\n",
+    "    strike_price=10500,\n",
+    "    premium=200,\n",
+    "    expiry=datetime.utcnow() + timedelta(days=10),\n",
+    "    underlying_asset=etf,\n",
+    "    ask=210,\n",
+    "    bid=190,\n",
+    "    transaction_fee=0.5,\n",
+    "    settlement_cost=1.0,\n",
+    "    benchmark_index=\"S&P 500\"\n",
+    ")\n"
    ]
   },
   {
    "cell_type": "code",
    "execution_count": null,
-   "id": "45cd3a53",
+   "id": "7d8c1e97",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "📈 Spot Price: 10200\n",
+      "🕒 Time to Expiry: 10\n",
+      "📊 Break Even Price: 10857.5\n",
+      "💰 Payoff at 11000: 135000.0\n",
+      "📉 Contract Status: OUT_OF_THE_MONEY\n",
+      "🔁 Is Liquid: True\n",
+      "📉 NAV Deviation? True\n",
+      "📉 Deviation Value: 0.04081632653061224\n",
+      "\n",
+      "📘 Greekهای StockOption:\n",
+      "Δ: 0.3269, Γ: 0.0007, Θ: -10.9050, 𝜈: 6.0907, ρ: 0.8845\n"
+     ]
+    }
+   ],
+   "source": [
+    "\n",
+    "print(\"📈 Spot Price:\", etf_option.spot_price)\n",
+    "print(\"🕒 Time to Expiry:\", etf_option.time_to_expiry_days)\n",
+    "print(\"📊 Break Even Price:\", etf_option.get_break_even_price())\n",
+    "print(\"💰 Payoff at 11000:\", etf_option.get_payoff(11000))\n",
+    "print(\"📉 Contract Status:\", etf_option.contract_status.name)\n",
+    "print(\"🔁 Is Liquid:\", etf_option.is_liquid())\n",
+    "print(\"📉 NAV Deviation?\", etf_option.has_nav_deviation(9800))\n",
+    "print(\"📉 Deviation Value:\", etf_option.nav_deviation)\n",
+    "# انتخاب مدل محاسبه اعداد یونانی ماژولار است\n",
+    "calculator = BlackScholesGreekCalculator()\n",
+    "print(\"\\n📘 Greekهای etf_option:\")\n",
+    "print(etf_option.get_greeks(calculator=calculator))\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "4c664b33",
+   "metadata": {},
+   "source": [
+    "## Leverage ETF"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "id": "16ab23cd",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from core.entities.asset.leverage_etf_asset import LeverageETFAsset\n",
+    "from core.entities.option.leverage_etf_option import LeverageETFOption"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "id": "9f24451f",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "etf_asset = LeverageETFAsset(\n",
+    "    name=\"نمونه اهرمی\",\n",
+    "    symbol=\"LETF\",\n",
+    "    isin=\"IR000000LETF\",\n",
+    "    market=Market.IFB_SECOND,\n",
+    "    last_price=9100,\n",
+    "    close_price=9000,\n",
+    "    previous_price=8800,\n",
+    "    ask_price=9150,\n",
+    "    bid_price=9050,\n",
+    "    leverage_ratio=2.0\n",
+    ")\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "id": "690b1d25",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "lev_etf_option = LeverageETFOption(\n",
+    "    contract_name=\"LETF_CALL_8800\",\n",
+    "    option_type=OptionType.CALL,\n",
+    "    strike_price=8800,\n",
+    "    premium=250,\n",
+    "    expiry=datetime.utcnow() + timedelta(days=20),\n",
+    "    underlying_asset=etf_asset,\n",
+    "    ask=260,\n",
+    "    bid=240,\n",
+    "    contract_size=1000,\n",
+    "    transaction_fee=0.5,     # 0.5 درصد\n",
+    "    settlement_cost=1.0      # 1 درصد\n",
+    ")\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "id": "28198a74",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "📘 Contract Info\n",
+      "نام: LETF_CALL_8800\n",
+      "نوع: OptionType.CALL\n",
+      "قیمت اعمال: 8800\n",
+      "پریمیوم: 250\n",
+      "----------------------------------------\n",
+      "⏳ زمان تا سررسید: 20 روز\n",
+      "📊 وضعیت قرارداد: IN_THE_MONEY\n",
+      "💰 قیمت سر به سر (Break-even): 9182.0\n",
+      "💸 Payoff در spot=9000: 15000.0\n",
+      "💸 Payoff در spot=8500: -377500.0\n",
+      "📉 حداکثر زیان: 386500.0\n",
+      "📈 حداکثر سود در max_spot=9500: 1013500.0\n",
+      "\n",
+      "📘 Greekهای lev_etf_option:\n",
+      "Δ: 0.7481, Γ: 0.0005, Θ: -8.5558, 𝜈: 6.7963, ρ: 3.4587\n"
+     ]
+    }
+   ],
+   "source": [
+    "\n",
+    "# 3️⃣ چاپ اطلاعات اولیه\n",
+    "print(\"📘 Contract Info\")\n",
+    "print(\"نام:\", lev_etf_option.contract_name)\n",
+    "print(\"نوع:\", lev_etf_option.option_type)\n",
+    "print(\"قیمت اعمال:\", lev_etf_option.strike_price)\n",
+    "print(\"پریمیوم:\", lev_etf_option.premium)\n",
+    "print(\"-\" * 40)\n",
+    "\n",
+    "# 4️⃣ زمان تا سررسید\n",
+    "print(\"⏳ زمان تا سررسید:\", lev_etf_option.time_to_expiry_days, \"روز\")\n",
+    "\n",
+    "# 5️⃣ وضعیت قرارداد\n",
+    "print(\"📊 وضعیت قرارداد:\", lev_etf_option.contract_status.name)\n",
+    "\n",
+    "# 6️⃣ محاسبه Break-even\n",
+    "print(\"💰 قیمت سر به سر (Break-even):\", lev_etf_option.get_break_even_price())\n",
+    "\n",
+    "# 7️⃣ محاسبه Payoff برای قیمت اسپات مختلف\n",
+    "print(\"💸 Payoff در spot=9000:\", lev_etf_option.get_payoff(spot_price=9000))\n",
+    "print(\"💸 Payoff در spot=8500:\", lev_etf_option.get_payoff(spot_price=8500))\n",
+    "\n",
+    "# 8️⃣ حداکثر زیان\n",
+    "print(\"📉 حداکثر زیان:\", lev_etf_option.get_max_loss())\n",
+    "\n",
+    "# 9️⃣ حداکثر سود در سقف فرضی 9500\n",
+    "print(\"📈 حداکثر سود در max_spot=9500:\", lev_etf_option.get_max_gain(max_spot=9500))\n",
+    "\n",
+    "# انتخاب مدل محاسبه اعداد یونانی ماژولار است\n",
+    "calculator = BlackScholesGreekCalculator()\n",
+    "print(\"\\n📘 Greekهای lev_etf_option:\")\n",
+    "print(lev_etf_option.get_greeks(calculator=calculator))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "b6ba15aa",
    "metadata": {},
    "outputs": [],
    "source": []
@@ -1432,6 +1923,208 @@ def test_stock_asset_trading_status():
 ## 🗂️ Layer: Option
 📂 Path: `tests/core/entities/option`
 
+- **File**: `test_etf_option.py`
+  - 📍 Path: `tests/core/entities/option/test_etf_option.py`
+
+```python
+# tests/core/entities/option/test_etf_option.py
+
+import pytest
+from datetime import datetime, timedelta
+
+from core.entities.asset.etf_asset import ETFAsset
+from core.entities.option.etf_option import ETFOption
+from core.entities.enum.enums import OptionType, Market, ContractStatus
+from core.entities.asset.asset import AbstractAsset
+
+
+# --------------------
+# Fixtures
+# --------------------
+
+@pytest.fixture
+def etf_asset():
+    return ETFAsset(
+        name="ETF نمونه",
+        symbol="ETF1",
+        isin="IR1234567890",
+        market=Market.IFB_FIRST,
+        last_price=11000.0,  # spot price
+        close_price=10800.0,
+        previous_price=10700.0,
+        ask_price=11050.0,
+        bid_price=10950.0
+    )
+
+
+@pytest.fixture
+def etf_option(etf_asset):
+    return ETFOption(
+        contract_name="ETF_CALL_10500",
+        option_type=OptionType.CALL,
+        strike_price=10500.0,
+        premium=200.0,
+        expiry=datetime.utcnow() + timedelta(days=10),
+        underlying_asset=etf_asset,
+        ask=210.0,
+        bid=190.0,
+        contract_size=1000,
+        transaction_fee=0.5,  # 0.5 درصد
+        settlement_cost=1.0,  # 1 درصد
+        benchmark_index="S&P 500"
+    )
+
+
+# --------------------
+# Tests
+# --------------------
+
+def test_underlying_is_etf(etf_option):
+    assert isinstance(etf_option.underlying_asset, AbstractAsset)
+    assert isinstance(etf_option.underlying_asset, ETFAsset)
+
+def test_valid_option(etf_option):
+    assert etf_option.is_valid() is True
+
+def test_time_to_expiry(etf_option):
+    assert 9 <= etf_option.time_to_expiry_days <= 10
+
+def test_contract_status(etf_option):
+    assert etf_option.contract_status == ContractStatus.IN_THE_MONEY
+
+def test_break_even_price(etf_option):
+    # strike = 10500
+    # premium = 200
+    # fee = 0.5% * 10500 = 52.5
+    # settle = 1% * 10500 = 105.0
+    # total = 200 + 52.5 + 105 = 357.5
+    expected = 10500 + 357.5
+    assert etf_option.get_break_even_price() == pytest.approx(expected, 0.1)
+
+def test_payoff_itm(etf_option):
+    # spot = 11000 → raw = 500/unit
+    # total cost/unit = 200 + (0.5% * 11000) + (1% * 11000) = 200 + 55 + 110 = 365
+    # payoff = (500 - 365) * 1000 = 135000
+    expected = (500 - 365) * 1000
+    assert etf_option.get_payoff(spot_price=11000) == pytest.approx(expected, 1)
+
+def test_payoff_otm(etf_option):
+    # spot = 10000 → raw = 0
+    # cost = 200 + (0.5% * 10000) + (1% * 10000) = 200 + 50 + 100 = 350
+    # payoff = -350 * 1000 = -350000
+    expected = -350000
+    assert etf_option.get_payoff(spot_price=10000) == pytest.approx(expected, 1)
+
+def test_is_liquid(etf_option):
+    # spread = 11050 - 10950 = 100 → 100 / 11000 = 0.009 → < 2%
+    assert etf_option.is_liquid() is True
+
+def test_nav_deviation_check(etf_option):
+    nav_price = 10600  # spot = 11000 → deviation = ~3.77%
+    assert etf_option.has_nav_deviation(nav_price) is True
+    assert etf_option.nav_deviation > 0.03
+```
+
+- **File**: `test_leverage_etf_option.py`
+  - 📍 Path: `tests/core/entities/option/test_leverage_etf_option.py`
+
+```python
+import pytest
+from datetime import datetime, timedelta
+
+from core.entities.asset.leverage_etf_asset import LeverageETFAsset
+from core.entities.option.leverage_etf_option import LeverageETFOption
+from core.entities.enum.enums import OptionType, Market, ContractStatus
+from core.entities.asset.asset import AbstractAsset
+
+
+# --------------------
+# Fixtures
+# --------------------
+
+@pytest.fixture
+def leverage_etf_asset():
+    return LeverageETFAsset(
+        name="LETF نمونه",
+        symbol="LETF1",
+        isin="IRLEVERAGE1234",
+        market=Market.IFB_SECOND,
+        last_price=9000.0,
+        close_price=8800.0,
+        previous_price=8700.0,
+        ask_price=9050.0,
+        bid_price=8950.0,
+        leverage_ratio=2.0
+    )
+
+
+@pytest.fixture
+def leverage_etf_option(leverage_etf_asset):
+    return LeverageETFOption(
+        contract_name="LETF_CALL_8500",
+        option_type=OptionType.CALL,
+        strike_price=8500.0,
+        premium=300.0,
+        expiry=datetime.utcnow() + timedelta(days=15),
+        underlying_asset=leverage_etf_asset,
+        ask=310.0,
+        bid=290.0,
+        contract_size=1000,
+        transaction_fee=0.5,  # درصد
+        settlement_cost=1.0,  # درصد
+        leverage_ratio=2.0
+    )
+
+
+# --------------------
+# Tests
+# --------------------
+
+def test_underlying_type(leverage_etf_option):
+    assert isinstance(leverage_etf_option.underlying_asset, AbstractAsset)
+    assert isinstance(leverage_etf_option.underlying_asset, LeverageETFAsset)
+
+def test_valid_option(leverage_etf_option):
+    assert leverage_etf_option.is_valid() is True
+
+def test_time_to_expiry(leverage_etf_option):
+    assert 14 <= leverage_etf_option.time_to_expiry_days <= 15
+
+def test_contract_status(leverage_etf_option):
+    assert leverage_etf_option.contract_status == ContractStatus.IN_THE_MONEY
+
+def test_break_even_price(leverage_etf_option):
+    # strike = 8500
+    # premium = 300
+    # fee = 0.5% * 8500 = 42.5
+    # settle = 1% * 8500 = 85.0
+    expected = 8500 + 300 + 42.5 + 85.0  # = 8927.5
+    assert leverage_etf_option.get_break_even_price() == pytest.approx(expected, 0.1)
+
+def test_payoff_itm(leverage_etf_option):
+    # spot = 9000 → raw = (9000 - 8500) * 2 = 1000/unit
+    # cost = 300 + 0.5%*9000 + 1%*9000 = 300 + 45 + 90 = 435/unit
+    # total = (1000 - 435) * 1000 = 565000
+    expected = (1000 - 435) * 1000
+    assert leverage_etf_option.get_payoff(spot_price=9000) == pytest.approx(expected, 1)
+
+def test_payoff_otm(leverage_etf_option):
+    # spot = 8000 → raw = 0
+    # cost = 300 + 40 + 80 = 420
+    expected = -420 * 1000
+    assert leverage_etf_option.get_payoff(spot_price=8000) == pytest.approx(expected, 1)
+
+def test_max_loss(leverage_etf_option):
+    # spot = 9000 → total cost = 300 + 45 + 90 = 435 → max loss = 435 * 1000 = 435000
+    assert leverage_etf_option.get_max_loss() == pytest.approx(435000, 1)
+
+def test_max_gain(leverage_etf_option):
+    # فرض: max_spot = 9500
+    # raw = (9500 - 8500) * 2 = 2000 → total = 2,000,000 - max_loss
+    expected = (2000 * 1000) - 435000
+    assert leverage_etf_option.get_max_gain(max_spot=9500) == pytest.approx(expected, 1)
+```
+
 - **File**: `test_stock_option.py`
   - 📍 Path: `tests/core/entities/option/test_stock_option.py`
 
@@ -1441,23 +2134,26 @@ from datetime import datetime, timedelta
 
 from core.entities.asset.stock_asset import StockAsset
 from core.entities.option.stock_option import StockOption
-from core.entities.enum.enums import OptionType, Market, AssetClass, ContractStatus
+from core.entities.enum.enums import OptionType, Market
+from core.entities.asset.asset import AbstractAsset  # برای بررسی دقیق
 
+# ---------------------
+# Fixtures
+# ---------------------
 
 @pytest.fixture
 def stock_asset():
     return StockAsset(
-        name="ExampleStock",
-        symbol="EXMPL",
-        isin="IR1234567890",
-        market=Market.TSE_SECOND,
+        name="فولاد مبارکه",
+        symbol="فولاد",
+        isin="IRO1FOLD0001",
+        market=Market.TSE_FIRST,
         last_price=150.0,
         close_price=148.0,
         previous_price=147.0,
         ask_price=151.0,
         bid_price=149.0
     )
-
 
 @pytest.fixture
 def stock_option_call(stock_asset):
@@ -1470,53 +2166,61 @@ def stock_option_call(stock_asset):
         underlying_asset=stock_asset,
         ask=6.0,
         bid=4.0,
-        transaction_fee=0.5,
-        settlement_cost=1.0
+        contract_size=1000,
+        transaction_fee=5.0,  # %
+        settlement_cost=1.0  # ثابت
     )
 
+@pytest.fixture
+def expired_option(stock_asset):
+    return StockOption(
+        contract_name="EXPIRED_CALL",
+        option_type=OptionType.CALL,
+        strike_price=160.0,
+        premium=5.0,
+        expiry=datetime.utcnow() - timedelta(days=1),
+        underlying_asset=stock_asset,
+        contract_size=1000
+    )
+
+# ---------------------
+# Tests
+# ---------------------
+
+def test_underlying_type(stock_option_call):
+    assert isinstance(stock_option_call.underlying_asset, AbstractAsset)
 
 def test_valid_option(stock_option_call):
     assert stock_option_call.is_valid() is True
 
-
 def test_time_to_expiry(stock_option_call):
-    assert stock_option_call.time_to_expiry_days == 30
+    assert 28 <= stock_option_call.time_to_expiry_days <= 31
 
-
-def test_spot_price(stock_option_call):
-    assert stock_option_call.spot_price == 150.0
-
-
-def test_contract_status(stock_option_call):
-    # Since spot = 150 < strike = 160 → CALL is out-of-the-money
-    assert stock_option_call.contract_status == ContractStatus.OUT_OF_THE_MONEY
-
-
-def test_expired_status(stock_option_call):
-    future_date = datetime.utcnow() + timedelta(days=1)
-    assert stock_option_call.has_expired(now=future_date) is False
-
-    past_date = datetime.utcnow() - timedelta(days=1)
-    assert stock_option_call.has_expired(now=past_date) is True
-
+def test_expired_status(expired_option, stock_option_call):
+    assert stock_option_call.has_expired() is False
+    assert expired_option.has_expired() is True
 
 def test_break_even_price(stock_option_call):
-    # For CALL: break_even = strike_price + premium
-    assert stock_option_call.get_break_even_price() == 165.0
-
+    # strike = 160, premium = 5, fee = 0.8, settle = 1 → break_even = 166.8
+    assert stock_option_call.get_break_even_price() == pytest.approx(166.8, 0.1)
 
 def test_payoff_itm(stock_option_call):
-    # spot = 170 > strike = 160 → CALL payoff = 10
-    assert stock_option_call.get_payoff(170.0) == 10.0
+    # spot = 170 → raw = 10/unit
+    # fee = 8.5, settle = 1.7 → total cost = 15.2/unit
+    expected = (10.0 - 15.2) * 1000  # = -5200
+    assert stock_option_call.get_payoff(170.0) == pytest.approx(expected, 1)
 
 
 def test_payoff_otm(stock_option_call):
-    # spot = 150 < strike = 160 → CALL payoff = 0
-    assert stock_option_call.get_payoff(150.0) == 0.0
+    # spot = 150 → raw = 0
+    # fee = 7.5, settle = 1.5 → total cost = 14.0/unit
+    expected = -14.0 * 1000  # = -14000
+    assert stock_option_call.get_payoff(150.0) == pytest.approx(expected, 1)
 
 
-def test_contract_size_default(stock_option_call):
-    assert stock_option_call.contract_size == 1000
+def test_contract_status(stock_option_call):
+    # spot = 150 < strike = 160 → OTM
+    assert stock_option_call.contract_status.name == "OUT_OF_THE_MONEY"
 ```
 
 - **File**: `__init__.py`

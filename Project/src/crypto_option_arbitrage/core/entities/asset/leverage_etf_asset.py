@@ -16,7 +16,8 @@ class LeverageETFAsset(AbstractAsset):
         close_price: float,
         previous_price: float,
         ask_price: float = None,
-        bid_price: float = None
+        bid_price: float = None,
+        leverage_ratio: float = 2.0  # نسبت اهرم پیش‌فرض (مثلاً 2 برابر)
     ):
         asset_class = AssetClass.LEVERAGE_ETF
         settlement_days = ASSET_SETTLEMENT_DAYS[asset_class]

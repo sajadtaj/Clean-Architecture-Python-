@@ -1204,11 +1204,175 @@ graph TD;
 
 ---
 
-### ✅ نتیجه‌گیری
-
-ساختار Config + Enum ترکیبی از **استواری منطقی** و **انعطاف عملیاتی** است که هم با اصول Clean Architecture و SOLID سازگار است و هم برای CI/CD و توسعه‌پذیری آماده است.
+برای به‌روزرسانی مستندات لایه `Entity` با توجه به توسعه‌های اخیر در پروژه، به‌ویژه اضافه شدن کلاس‌های جدید مانند `ETFOption`, `LeverageETFOption`, `CryptoOption` و افزودن متد محاسبه Greekها، نسخه نهایی مستند کامل زیر آماده شده است:
 
 ---
+
+## 🧾 نسخه به‌روز شده مستند لایه Entity
+
+<div dir='rtl'>
+
+# ✅ افزوده‌ها و تغییرات کلیدی
+
+---
+
+### 🔧 ساختار نهایی فایل‌ها:
+
+
+</div>
+
+```bash
+core/
+└── entities/
+    ├── asset/
+    │   ├── asset.py                # کلاس AbstractAsset
+    │   ├── stock_asset.py
+    │   ├── etf_asset.py
+    │   ├── leverage_etf_asset.py
+    │   ├── crypto_asset.py
+    ├── option/
+    │   ├── option.py               # کلاس AbstractOption
+    │   ├── stock_option.py
+    │   ├── etf_option.py
+    │   ├── leverage_etf_option.py
+    │   ├── crypto_option.py
+    ├── enum/
+    │   └── enums.py
+    └── value_objects/
+        └── option_greeks.py        # شیء ارزش Greekها
+```
+
+</div dir="rtl">
+---
+
+### 📈 افزودن Greek‌ها (Delta, Gamma, Vega, Theta, Rho)
+
+تمام Greekها در کلاس جدید `OptionGreeks` از مسیر `value_objects/option_greeks.py` نگهداری می‌شوند:
+
+```python
+@dataclass
+class OptionGreeks:
+    delta: float
+    gamma: float
+    theta: float
+    vega: float
+    rho: float
+```
+
+* این کلاس یک **Value Object** است و فقط داده را نگهداری می‌کند.
+* قابلیت استفاده در تمامی انواع `Option` را دارد.
+* خروجی تابع `get_greeks()` در `AbstractOption` از این جنس است.
+
+---
+
+### 🧠 افزودن مدل محاسبه Greekها به‌صورت ماژولار
+
+فایل:
+
+```
+core/entities/option/greek_models/black_scholes.py
+```
+
+تعریف کلاس بلک شولز برای محاسبه Greekها:
+
+```python
+class BlackScholesGreekCalculator:
+    def calculate(...) -> OptionGreeks:
+        ...
+```
+
+در آینده اگر بخواهیم مدل‌های دیگری مثل Heston، Binomial یا Monte Carlo اضافه کنیم، به‌سادگی از طریق یک کلاس جدید قابل انجام است.
+
+---
+
+### 🧰 تغییر در `AbstractOption`:
+
+تابع `get_greeks()` در `AbstractOption` اضافه شده:
+
+```python
+def get_greeks(
+    self,
+    risk_free_rate: float = RISK_FREE_RATE,
+    volatility: float = 0.3,
+    model: Optional[GreekCalculator] = None
+) -> OptionGreeks:
+    model = model or BlackScholesGreekCalculator()
+    return model.calculate(...)
+```
+
+✅ این ساختار کاملاً **ماژولار** است
+✅ امکان انتخاب مدل محاسبه Greek به‌صورت runtime وجود دارد
+✅ مقدار پیش‌فرض نوسان ۳۰٪ و نرخ بدون ریسک از کانفیگ خوانده می‌شود.
+
+---
+
+## 🎯 ساختار نهایی کلاس‌ها در نمودار
+
+```mermaid
+classDiagram
+    class AbstractAsset
+    class StockAsset
+    class ETFAsset
+    class LeverageETFAsset
+    class CryptoAsset
+
+    class AbstractOption
+    class StockOption
+    class ETFOption
+    class LeverageETFOption
+    class CryptoOption
+
+    class OptionGreeks
+
+    AbstractAsset <|-- StockAsset
+    AbstractAsset <|-- ETFAsset
+    AbstractAsset <|-- LeverageETFAsset
+    AbstractAsset <|-- CryptoAsset
+
+    AbstractOption <|-- StockOption
+    AbstractOption <|-- ETFOption
+    AbstractOption <|-- LeverageETFOption
+    AbstractOption <|-- CryptoOption
+
+    AbstractOption o-- AbstractAsset : underlying_asset
+    AbstractOption --> OptionGreeks : get_greeks()
+```
+
+---
+
+## 📌 خلاصه طراحی Clean Architecture در لایه Entity
+
+| اصل SOLID | رعایت در پروژه                                                       |
+| --------- | -------------------------------------------------------------------- |
+| ✅ SRP     | هر کلاس فقط یک مسئولیت دارد (مثلاً محاسبه Greek یا مدل‌سازی ETF)     |
+| ✅ OCP     | اضافه شدن هر نوع Option جدید بدون تغییر در کلاس پایه                 |
+| ✅ LSP     | تمامی کلاس‌های `XOption` می‌توانند جایگزین `AbstractOption` شوند     |
+| ✅ DIP     | Greekها و Configها به صورت تزریق خارجی و ماژولار پیاده‌سازی شده‌اند  |
+| ✅ ISP     | هر کلاس فقط توابع مورد نیاز خود را دارد و رفتارهای تحمیلی وجود ندارد |
+
+---
+
+### 📘 وابستگی‌ها و اتصال با Config
+
+```mermaid
+graph TD
+    Config[config/*] -->|RISK_FREE_RATE| AbstractOption
+    AbstractOption --> OptionGreeks
+    AbstractOption -->|depends on| AbstractAsset
+    AbstractAsset -->|inherits| AssetClass
+    Market --> MARKET_PRICE_LIMITS
+    AssetClass --> ASSET_TRANSACTION_FEES
+```
+
+---
+
+## ✅ نتیجه‌گیری
+
+🔹 لایه Entity با این توسعه اکنون آماده استفاده برای تحلیل، بک‌تست و اجرای سیستماتیک اختیار معامله در بازارهای مختلف است.
+🔹 تمام دارایی‌های پایه (Stock, ETF, LeverageETF, Crypto) و آپشن‌های مربوطه پوشش داده شده‌اند.
+🔹 Greekها به صورت کامل و مستقل، در سطح ماژولار قابل استفاده هستند و قابل گسترش به سایر مدل‌ها می‌باشند.
+
+</div>
 
 
 

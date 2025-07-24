@@ -3,9 +3,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 from math import ceil
+from core.config.market_rules import RISK_FREE_RATE
 
 from core.entities.enum.enums import OptionType, ContractStatus
 from core.entities.asset.asset import AbstractAsset
+from core.entities.option.calculators.greeks.black_scholes import BlackScholesGreekCalculator
+from core.entities.option.value_objects.greeks import OptionGreeks
+from core.entities.option.calculators.greeks.base import BaseGreekCalculator
 
 
 @dataclass
@@ -68,7 +72,29 @@ class AbstractOption(ABC):
             self.expiry > datetime.utcnow() and
             isinstance(self.underlying_asset, AbstractAsset)
         )
-
+        
+    def get_greeks(
+        self,
+        calculator: BaseGreekCalculator = BlackScholesGreekCalculator(),
+        risk_free_rate: float = RISK_FREE_RATE,
+        volatility: float = 0.3
+    ) -> OptionGreeks:
+        """
+        محاسبه Greekها با استفاده از مدل مشخص شده
+        پارامترها:
+        - calculator: شیء محاسبه‌گر از کلاس GreekCalculator (مانند BlackScholesGreekCalculator)
+        - risk_free_rate: نرخ بهره بدون ریسک (پیش‌فرض از کانفیگ)
+        - volatility: نوسان دارایی پایه (پیش‌فرض 30 درصد)
+        """
+        return calculator.calculate(
+            option_type=self.option_type,
+            spot=self.spot_price,
+            strike=self.strike_price,
+            time_to_expiry=self.time_to_expiry_days / 365,
+            risk_free_rate=risk_free_rate,
+            volatility=volatility
+        )
+        
     @abstractmethod
     def get_payoff(self, spot_price: Optional[float] = None) -> float:
         ...
